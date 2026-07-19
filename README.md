@@ -67,7 +67,7 @@ https://www.postman.com/yashsrv12/workspace/faym/collection/15874956-d5fdbcef-78
 
 Suggested order:
 
-1. `POST /v1/payouts/advance/run`
+1. `POST /v1/payouts/advance-payout`
 2. `PATCH /v1/sales/:id/reconcile` (reconcile all 3 seeded sales, 1 rejected, 2 approved)
 3. `GET /v1/users/:userId/balance`
 4. `POST /v1/withdrawals`
