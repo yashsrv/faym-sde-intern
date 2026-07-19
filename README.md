@@ -51,7 +51,7 @@ One user (`john_doe`) with 3 pending sales, brand `brand_1`, ₹40 each. Same nu
 
 ## Schema
 
-Three tables, under the `faym` schema:
+Three tables, under the `public` schema:
 
 - `users`: the affiliate, plus a cached balance
 - `sales`: each sale, moves from pending to approved/rejected
