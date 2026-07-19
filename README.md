@@ -49,17 +49,31 @@ docker compose up -d --build
 
 One user (`john_doe`) with 3 pending sales, brand `brand_1`, ₹40 each. Same numbers as the assignment PDF's example.
 
-## Schema
+# Deliverables
+
+## 1. LLD Overview
+
+Layered architecture: App → Routes → Controllers → Services → DB (pg Pool)
+
+## 2. Database Schema
 
 Three tables, under the `public` schema:
 
-- `users`: the affiliate, plus a cached balance
-- `sales`: each sale, moves from pending to approved/rejected
+- `users`: table for affiliates.
+- `sales`: each sale, moves from pending to approved/rejected after reconciliation.
 - `transactions`: a ledger. Every advance, adjustment, withdrawal, and reversal is a row here. The balance on users is kept in sync with this table, but the ledger is the actual source of truth.
 
-A partial unique index makes sure a sale can never get advance paid twice, even if the job runs more than once. Withdrawal reversals link back to the original withdrawal so you can trace why a balance changed. Money operations run inside a single DB transaction so they can't half complete. Row locking is used to stop two requests racing each other.
+Key Indexes:
 
-## Testing
+1. Partial unique index `(sale_id) WHERE type='advance_payout' AND status='success'` —> guarantees idempotency, a sale can never be advance-paid twice even if the job reruns.
+2. `(user_id, type, created_at)` —> powers the 24h withdrawal cooldown check.
+3. `sales(user_id), sales(status)` —> lookup/filter speed.
+
+ER Diagram:
+
+<img width="526" height="964" alt="er-diagram" src="https://github.com/user-attachments/assets/93362e73-967c-4f5e-81ec-4b433705b6d3" />
+
+## 3. API Endpoints
 
 Postman collection:
 
@@ -67,13 +81,21 @@ https://www.postman.com/yashsrv12/workspace/faym/collection/15874956-d5fdbcef-78
 
 Suggested order:
 
-1. `POST /v1/payouts/advance-payout`
-2. `PATCH /v1/sales/:id/reconcile` (reconcile all 3 seeded sales, 1 rejected, 2 approved)
-3. `GET /v1/users/:userId/balance`
-4. `POST /v1/withdrawals`
-5. `PATCH /v1/withdrawals/:id/status` (mark it failed, check the amount comes back)
-6. `GET /v1/users/:userId/transactions`
+1. `POST /v1/payouts/advance-payout`: Pay 10% advance on all pending
+2. `PATCH /v1/sales/:id/reconcile`: Reconcile pending sale
+3. `GET /v1/users/:userId/balance`: Fetch urrent cached balance of a user
+4. `POST /v1/withdrawals`: Request withdrawal (debits balance, pending txn)
+5. `PATCH /v1/withdrawals/:id/status`: Resolve withdrawal (success/failed/cancelled/rejected) [Withdrawal reversals on status other than success]
+6. `GET /v1/users/:userId/transactions`: Fetch all transactions of a user
 
-## Notes
+## Edge Cases & Failure Handling
 
-No auth on the endpoints since this is just for review. No automated tests, tested manually through Postman. Balance can be recomputed from the ledger if it ever drifts, but there's no job doing that automatically. Would use a real migration tool instead of one schema.sql file for a production system.
+1. **Double advance payout**: prevented by NOT EXISTS`` subquery + the partial unique index.
+2. **Re-reconciling a sale**: blocked by checking `sale.status !== 'pending'` under row lock.
+3. **Race conditions**: `SELECT ... FOR UPDATE` on users/sales/transactions before mutating, so two concurrent requests for the same user/sale serialize instead of corrupting balance.
+4. **Withdrawal cooldown**: 24h window checked via indexed query before allowing a new withdrawal.
+5. **Insufficient balance**: checked before debiting, inside the same lock.
+6. **Withdrawal failure/rejection**: auto-generates a `withdrawal_reversal` transaction linked via `related_transaction_id`, credits balance back.
+7. **Atomicity**: every multi-step money operation (payout, reconcile, withdraw, reverse) runs in one `BEGIN...COMMIT`, rolled back entirely on any error.
+
+⚠️ Not handled: no auth, no automated tests, no input sanitization beyond basic presence checks, no idempotency key on the API layer itself (relies on DB constraint).
