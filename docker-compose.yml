@@ -1,0 +1,44 @@
+name: faym
+
+services:
+  api:
+    image: api:latest
+    build: .
+    container_name: api
+    restart: on-failure:10
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - faym-network
+    ports:
+      - "127.0.0.1:${PORT}:${PORT}"
+
+  postgres:
+    image: postgres:17.2
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:5432:5432"  # Added this to work with DataGrip.
+    networks:
+      - faym-network
+    volumes:
+      - postgres-volume:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-volume:
+
+networks:
+  faym-network:
